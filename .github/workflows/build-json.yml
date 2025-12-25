@@ -34,12 +34,19 @@ jobs:
 
       - name: Commit NPCs.json if changed
         run: |
-          if git diff --quiet -- NPCs.json; then
+          if [ ! -f NPCs.json ]; then
+            echo "NPCs.json was not generated!"
+            exit 1
+          fi
+
+          git add -f NPCs.json
+
+          if git diff --cached --quiet; then
             echo "NPCs.json unchanged."
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NPCs.json
           git commit -m "Auto-generate NPCs.json from NPCs.xlsx"
           git push
