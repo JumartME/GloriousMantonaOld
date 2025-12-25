@@ -1,2 +1,0 @@
-# GloriousMantona
-Tales of Legend

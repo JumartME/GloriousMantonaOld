@@ -1,561 +1,203 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>NPC Organizer</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>NPC Viewer</title>
 
-  <!-- Vue 3 (global build) -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-
-  <!-- SheetJS (xlsx) -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 
   <style>
-    :root { --border:#e6e6e6; --muted:#666; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    .app { display:grid; grid-template-columns: 460px 1fr; height: 100vh; }
-    .left { border-right: 1px solid var(--border); padding: 12px; overflow:auto; }
-    .right { padding: 16px; overflow:auto; }
-    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .grid { display:grid; gap:8px; }
-    input, select, button { font: inherit; }
-    input, select {
-      padding: 8px; border:1px solid var(--border); border-radius: 10px; width:100%; box-sizing:border-box;
-      background:#fff;
+    .thumb {
+      width: 44px;
+      height: 44px;
+      object-fit: cover;
+      border-radius: .5rem;
+      background: #f1f3f5;
+      border: 1px solid rgba(0,0,0,.1);
+      flex: 0 0 auto;
     }
-    button {
-      padding: 8px 10px; border:1px solid var(--border); border-radius:10px;
-      background:#fff; cursor:pointer;
+    .thumb.missing {
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      color: #6c757d;
     }
-    button:disabled { opacity:0.5; cursor:not-allowed; }
-    .card {
-      display:grid; grid-template-columns: 52px 1fr; gap: 10px;
-      padding: 8px; border:1px solid var(--border); border-radius: 12px;
-      background:#fff; cursor:pointer; text-align:left;
+    .npc-row { cursor: pointer; }
+    .npc-name { font-weight: 700; }
+    .npc-meta { font-size: .85rem; color: #6c757d; }
+    .modal-img {
+      width: 100%;
+      height: auto;
+      border-radius: 1rem;
+      border: 1px solid rgba(0,0,0,.1);
+      background: #f1f3f5;
     }
-    .card.active { background:#f6f6f6; }
-    .thumb { width:52px; height:52px; object-fit:cover; border-radius: 10px; border:1px solid var(--border); }
-    .name { font-weight: 700; }
-    .meta { font-size: 12px; color: var(--muted); }
-    .tagrow { display:flex; gap:8px; flex-wrap:wrap; margin-top: 10px; }
-    .tag { border:1px solid var(--border); border-radius:999px; padding: 6px 10px; font-size: 12px; }
-    .bigimg { width: 100%; max-height: 520px; object-fit: contain; border:1px solid var(--border); border-radius: 14px; background:#fafafa; }
-    .kv { display:grid; grid-template-columns: 220px 1fr; gap:10px; }
-    .kv > div { padding: 8px 10px; border:1px solid var(--border); border-radius: 12px; }
-    h1,h2,h3 { margin: 0; }
-    h3 { margin-top: 16px; }
-    .muted { color: var(--muted); }
-    .small { font-size: 12px; }
-    .divider { height:1px; background: var(--border); margin: 12px 0; }
-    .hint { background:#fafafa; border:1px solid var(--border); padding:10px; border-radius:12px; }
-    .pill {
-      display:inline-flex; align-items:center; gap:8px;
-      border:1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 12px;
-      user-select:none;
-    }
-    .pill input { width:auto; }
-    .status { font-size:12px; }
-    .status.ok { color:#1a7f37; }
-    .status.warn { color:#b35c00; }
-    .status.err { color:#b42318; }
+    .kv .k { color: #6c757d; }
+    .kv .v { font-weight: 500; }
+    .kv .row { padding-top: .25rem; padding-bottom: .25rem; border-bottom: 1px dashed rgba(0,0,0,.08); }
+    .kv .row:last-child { border-bottom: 0; }
+    .prewrap { white-space: pre-wrap; }
   </style>
 </head>
 
-<body>
-<div id="app" class="app">
-  <!-- LEFT -->
-  <div class="left">
-    <div class="row">
-      <button @click="refreshFromXlsx()" :disabled="isLoading">
-        {{ isLoading ? "Loading…" : "Refresh" }}
-      </button>
-      <button @click="clearAll()" :disabled="isLoading">Clear</button>
+<body class="bg-light">
+  <div class="container py-4">
 
-      <span class="status" :class="statusClass" v-if="statusText">
-        {{ statusText }}
-      </span>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="hint small muted">
-      Excel is loaded from <b>{{ xlsxUrl }}</b> (same folder).<br/>
-      Images are derived as <b>/images/&lt;Origin&gt;/&lt;FirstName&gt;.jpg</b>.<br/>
-      Run locally with: <b>python -m http.server</b> and open <b>http://localhost:8000</b>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="grid">
-      <input v-model="filters.q" placeholder="Search Name…" />
-
-      <div class="row" style="gap:10px;">
-        <label class="pill" title="Show only NPCs whose portrait image is missing">
-          <input type="checkbox" v-model="filters.missingImageOnly" />
-          Missing image only
-        </label>
-
-        <label class="pill" title="Show a small badge in the list for missing images">
-          <input type="checkbox" v-model="showImageBadges" />
-          Image badges
-        </label>
-      </div>
-
-      <select v-model="filters.species">
-        <option value="any">Any Species</option>
-        <option v-for="v in options.species" :key="v" :value="v">{{ v }}</option>
-      </select>
-
-      <select v-model="filters.concept">
-        <option value="any">Any Concept</option>
-        <option v-for="v in options.concept" :key="v" :value="v">{{ v }}</option>
-      </select>
-
-      <select v-model="filters.origin">
-        <option value="any">Any Origin</option>
-        <option v-for="v in options.origin" :key="v" :value="v">{{ v }}</option>
-      </select>
-
-      <!-- Optional (enable automatically if you add these columns to Excel) -->
-      <select v-model="filters.location" :disabled="!hasColumn.Location">
-        <option value="any">Any Location</option>
-        <option v-for="v in options.location" :key="v" :value="v">{{ v }}</option>
-      </select>
-
-      <select v-model="filters.attitude" :disabled="!hasColumn.Attitude">
-        <option value="any">Any Attitude</option>
-        <option value="friendly">Friendly</option>
-        <option value="neutral">Neutral</option>
-        <option value="hostile">Hostile</option>
-      </select>
-
-      <div class="row" style="gap:10px;">
-        <label style="flex:1;">
-          <div class="small muted">Met</div>
-          <select v-model="filters.met" :disabled="!hasColumn.Met">
-            <option value="any">Any</option>
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
-          </select>
-        </label>
-
-        <label style="flex:1;">
-          <div class="small muted">Recruited</div>
-          <select v-model="filters.recruited" :disabled="!hasColumn.Recruited">
-            <option value="any">Any</option>
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
-          </select>
-        </label>
-
-        <label style="flex:1;">
-          <div class="small muted">Defeated</div>
-          <select v-model="filters.defeated" :disabled="!hasColumn.Defeated">
-            <option value="any">Any</option>
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
-          </select>
-        </label>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="muted small" v-if="npcs.length === 0">
-      Click <b>Refresh</b> to load NPCs.xlsx.
-    </div>
-
-    <div class="muted small" v-else>
-      Showing {{ filtered.length }} of {{ npcs.length }}
-    </div>
-
-    <div class="grid" style="margin-top:10px;">
-      <div
-        class="card"
-        v-for="npc in filtered"
-        :key="npc.__id"
-        :class="{active: selected && selected.__id === npc.__id}"
-        @click="selected = npc"
-      >
-        <img class="thumb" :src="imagePath(npc)" @error="onImgTagError" alt="" />
-        <div>
-          <div class="row" style="justify-content:space-between; gap:10px;">
-            <div class="name">{{ showVal(npc.Name) }}</div>
-            <span v-if="showImageBadges" class="tag" style="padding:4px 8px;">
-              {{ imageBadge(npc.__id) }}
-            </span>
-          </div>
-          <div class="meta">
-            {{ [showVal(npc.Species), showVal(npc.Concept), showVal(npc.Origin)].join(" • ") }}
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT -->
-  <div class="right">
-    <div v-if="!selected" class="muted">
-      Select an NPC to see details.
-    </div>
-
-    <div v-else style="max-width: 980px;">
-      <h1>{{ showVal(selected.Name) }}</h1>
-      <div class="muted" style="margin-top:6px;">
-        {{ [showVal(selected.Gender), showVal(selected.Age), showVal(selected.Species), showVal(selected.Concept), showVal(selected.Origin)].join(" • ") }}
-      </div>
-
-      <div style="margin-top:14px;">
-        <img class="bigimg" :src="imagePath(selected)" @error="onImgTagError" alt="" />
-      </div>
-
-      <div class="tagrow">
-        <span class="tag">Met: {{ boolLabel(selected.Met) }}</span>
-        <span class="tag">Recruited: {{ boolLabel(selected.Recruited) }}</span>
-        <span class="tag">Defeated: {{ boolLabel(selected.Defeated) }}</span>
-        <span class="tag">Attitude: {{ showVal(selected.Attitude) }}</span>
-        <span class="tag">Location: {{ showVal(selected.Location) }}</span>
-        <span class="tag">Image: {{ imageBadge(selected.__id) }}</span>
-      </div>
-
-      <h3>Overview</h3>
-      <div class="kv" style="margin-top:10px;">
-        <div><b>Species</b><div class="muted">{{ showVal(selected.Species) }}</div></div>
-        <div><b>Concept</b><div class="muted">{{ showVal(selected.Concept) }}</div></div>
-        <div><b>Origin</b><div class="muted">{{ showVal(selected.Origin) }}</div></div>
-        <div><b>Gender</b><div class="muted">{{ showVal(selected.Gender) }}</div></div>
-        <div><b>Age</b><div class="muted">{{ showVal(selected.Age) }}</div></div>
-        <div><b>Skills</b><div class="muted">{{ showVal(selected.stats?.Skills) }}</div></div>
-      </div>
-
+    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-3">
       <div>
-        <h3>Description</h3>
-        <div style="white-space: pre-wrap; line-height: 1.55; margin-top:8px;">
-          {{ showVal(selected.Description) }}
-        </div>
+        <h1 class="h3 mb-0">NPC Viewer</h1>
+        <div class="text-secondary small" id="status">No cached data. Upload an Excel file to begin.</div>
       </div>
 
-      <div v-if="selected.stats && Object.keys(selected.stats).length">
-        <h3>Stats</h3>
-        <div class="kv" style="margin-top:10px;">
-          <div v-for="(v,k) in selected.stats" :key="k">
-            <b>{{ k }}</b>
-            <div class="muted">{{ showVal(formatValue(v)) }}</div>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <label class="btn btn-primary mb-0">
+          Upload Excel
+          <input id="file" type="file" accept=".xlsx" hidden>
+        </label>
+        <button id="clear" class="btn btn-outline-secondary" type="button">Clear cache</button>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <div class="row g-2 align-items-end">
+          <div class="col-12 col-md-4">
+            <label class="form-label mb-1">Search</label>
+            <input id="q" class="form-control" type="search" placeholder="Search name...">
+          </div>
+
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Origin</label>
+            <select id="origin" class="form-select"></select>
+          </div>
+
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Reputation</label>
+            <select id="reputation" class="form-select"></select>
+          </div>
+
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Relation</label>
+            <select id="relation" class="form-select"></select>
+          </div>
+
+          <div class="col-6 col-md-2">
+            <label class="form-label mb-1">Sort</label>
+            <select id="sort" class="form-select"></select>
+          </div>
+
+          <div class="col-12 col-md-6 d-flex flex-wrap gap-3 pt-2">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="onlyRecruited">
+              <label class="form-check-label" for="onlyRecruited">Only Recruited</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="hideDefeated" checked>
+              <label class="form-check-label" for="hideDefeated">Hide Defeated</label>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6 text-md-end text-secondary small pt-2">
+            <span id="count">0 shown / 0 total</span>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="divider"></div>
-      <div class="small muted">
-        Save changes to NPCs.xlsx, then click <b>Refresh</b>.
+    <!-- List -->
+    <div class="card shadow-sm">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <div class="fw-semibold">NPCs</div>
+        <div class="text-secondary small">Tap/click a row for details</div>
+      </div>
+      <div class="list-group list-group-flush" id="list"></div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal fade" id="npcModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h5 class="modal-title mb-0" id="modalTitle">NPC</h5>
+            <div class="text-secondary small" id="modalSubtitle"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="row g-3">
+            <!-- left: data -->
+            <div class="col-12 col-lg-8">
+              <div class="row g-3">
+                <div class="col-12 col-md-6">
+                  <div class="card">
+                    <div class="card-header bg-white fw-semibold">Identity</div>
+                    <div class="card-body kv" id="kvIdentity"></div>
+                  </div>
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <div class="card">
+                    <div class="card-header bg-white fw-semibold">Social</div>
+                    <div class="card-body kv" id="kvSocial"></div>
+                  </div>
+                </div>
+
+                <div class="col-12">
+                  <div class="card">
+                    <div class="card-header bg-white fw-semibold">Stats</div>
+                    <div class="card-body kv" id="kvStats"></div>
+                  </div>
+                </div>
+
+                <div class="col-12">
+                  <div class="card">
+                    <div class="card-header bg-white fw-semibold">Gear & Abilities</div>
+                    <div class="card-body kv" id="kvGear"></div>
+                  </div>
+                </div>
+
+                <div class="col-12">
+                  <div class="card">
+                    <div class="card-header bg-white fw-semibold">Skills</div>
+                    <div class="card-body prewrap" id="skillsBox"></div>
+                  </div>
+                </div>
+
+                <div class="col-12">
+                  <div class="card">
+                    <div class="card-header bg-white fw-semibold">Description</div>
+                    <div class="card-body prewrap" id="descBox"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- right: image -->
+            <div class="col-12 col-lg-4">
+              <img id="modalImg" class="modal-img" alt="">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <div class="text-secondary small me-auto" id="modalFooter"></div>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+
       </div>
     </div>
   </div>
-</div>
 
-<script>
-const { createApp } = Vue;
+  <!-- Bootstrap JS (for modal) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
-createApp({
-  data() {
-    return {
-      xlsxUrl: "NPCs.xlsx",   // <-- must be served via http://localhost:8000/NPCs.xlsx
-      npcs: [],
-      selected: null,
-
-      isLoading: false,
-      statusText: "",
-      statusClass: "",
-
-      showImageBadges: true,
-
-      // imageStatus: id -> "unknown" | "ok" | "missing"
-      imageStatus: {},
-
-      // tracks whether optional columns exist
-      hasColumn: {
-        Location: false,
-        Attitude: false,
-        Met: false,
-        Recruited: false,
-        Defeated: false,
-      },
-
-      placeholder: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`
-        <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
-          <rect width="100%" height="100%" fill="#f0f0f0"/>
-          <text x="50%" y="50%" font-family="Arial" font-size="16" fill="#999" text-anchor="middle" dominant-baseline="middle">
-            No Image
-          </text>
-        </svg>
-      `),
-
-      filters: {
-        q: "",
-        species: "any",
-        concept: "any",
-        origin: "any",
-
-        missingImageOnly: false,
-
-        // optional filters (disabled unless columns exist)
-        location: "any",
-        attitude: "any",
-        met: "any",
-        recruited: "any",
-        defeated: "any",
-      }
-    };
-  },
-
-  computed: {
-    options() {
-      const uniq = (key) => {
-        const set = new Set();
-        for (const n of this.npcs) {
-          const v = (n[key] || "").toString().trim();
-          if (v) set.add(v);
-        }
-        return Array.from(set).sort((a,b) => a.localeCompare(b));
-      };
-      return {
-        species: uniq("Species"),
-        concept: uniq("Concept"),
-        origin: uniq("Origin"),
-        location: uniq("Location"),
-      };
-    },
-
-    filtered() {
-      const q = this.filters.q.trim().toLowerCase();
-      const triMatch = (val, want) => {
-        if (want === "any") return true;
-        if (want === "yes") return val === true;
-        return val === false; // only explicit false
-      };
-
-      return this.npcs.filter(n => {
-        if (q && !String(n.Name || "").toLowerCase().includes(q)) return false;
-
-        if (this.filters.species !== "any" && (n.Species || "") !== this.filters.species) return false;
-        if (this.filters.concept !== "any" && (n.Concept || "") !== this.filters.concept) return false;
-        if (this.filters.origin !== "any" && (n.Origin || "") !== this.filters.origin) return false;
-
-        if (this.hasColumn.Location && this.filters.location !== "any" && (n.Location || "") !== this.filters.location) return false;
-        if (this.hasColumn.Attitude && this.filters.attitude !== "any" && (n.Attitude || "") !== this.filters.attitude) return false;
-
-        if (this.hasColumn.Met && !triMatch(n.Met, this.filters.met)) return false;
-        if (this.hasColumn.Recruited && !triMatch(n.Recruited, this.filters.recruited)) return false;
-        if (this.hasColumn.Defeated && !triMatch(n.Defeated, this.filters.defeated)) return false;
-
-        if (this.filters.missingImageOnly) {
-          const st = this.imageStatus[n.__id] || "unknown";
-          if (st !== "missing") return false;
-        }
-
-        return true;
-      });
-    }
-  },
-
-  methods: {
-    setStatus(kind, text) {
-      this.statusText = text;
-      this.statusClass = kind === "ok" ? "ok" : kind === "warn" ? "warn" : "err";
-    },
-
-    clearAll() {
-      this.npcs = [];
-      this.selected = null;
-      this.imageStatus = {};
-      this.hasColumn = { Location:false, Attitude:false, Met:false, Recruited:false, Defeated:false };
-      this.filters = {
-        q:"", species:"any", concept:"any", origin:"any",
-        missingImageOnly:false,
-        location:"any", attitude:"any", met:"any", recruited:"any", defeated:"any"
-      };
-      this.setStatus("warn", "Cleared.");
-    },
-
-    // Show missing fields as "?"
-    showVal(v) {
-      const s = (v === null || v === undefined) ? "" : String(v).trim();
-      return s.length ? s : "?";
-    },
-
-    formatValue(v) {
-      if (Array.isArray(v)) return v.join(", ");
-      if (v && typeof v === "object") return JSON.stringify(v);
-      return String(v);
-    },
-
-    boolLabel(v) {
-      if (v === true) return "Yes";
-      if (v === false) return "No";
-      return "?";
-    },
-
-    toBool(v) {
-      if (v === null || v === undefined || v === "") return undefined;
-      if (typeof v === "boolean") return v;
-      const s = String(v).trim().toLowerCase();
-      if (["true","yes","y","1"].includes(s)) return true;
-      if (["false","no","n","0"].includes(s)) return false;
-      return undefined;
-    },
-
-    normalizeAttitude(v) {
-      const s = String(v || "").trim().toLowerCase();
-      if (["friendly","neutral","hostile"].includes(s)) return s;
-      return "";
-    },
-
-    imagePath(npc) {
-      const origin = String(npc.Origin || "").trim();
-      const name = String(npc.Name || "").trim();
-      if (!origin || !name) return this.placeholder;
-
-      const first = name.split(/\s+/)[0];
-      return `/images/${encodeURIComponent(origin)}/${encodeURIComponent(first)}.jpg`;
-    },
-
-    // When an <img> tag fails, show placeholder (but the missing-image filter uses preloads)
-    onImgTagError(e) {
-      e.target.src = this.placeholder;
-    },
-
-    imageBadge(id) {
-      const st = this.imageStatus[id] || "unknown";
-      if (st === "ok") return "Image ✓";
-      if (st === "missing") return "Missing ✕";
-      return "Checking…";
-    },
-
-    // Proactively check images so we can filter by "missing image"
-    preloadAllImages() {
-      const next = {};
-      for (const npc of this.npcs) next[npc.__id] = "unknown";
-      this.imageStatus = next;
-
-      for (const npc of this.npcs) {
-        const id = npc.__id;
-        const src = this.imagePath(npc);
-
-        // If we can't even derive a path, treat as missing.
-        if (!npc.Origin || !npc.Name || src === this.placeholder) {
-          this.imageStatus[id] = "missing";
-          continue;
-        }
-
-        const img = new Image();
-        img.onload = () => { this.imageStatus[id] = "ok"; };
-        img.onerror = () => { this.imageStatus[id] = "missing"; };
-        img.src = src;
-      }
-    },
-
-    async refreshFromXlsx() {
-      this.isLoading = true;
-      this.setStatus("warn", `Loading ${this.xlsxUrl}…`);
-
-      try {
-        // Cache-bust so refresh picks up saved changes
-        const url = `${this.xlsxUrl}?t=${Date.now()}`;
-        const res = await fetch(url);
-
-        if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${this.xlsxUrl}`);
-        const buf = await res.arrayBuffer();
-
-        const wb = XLSX.read(buf, { type: "array" });
-        const sheetName = wb.SheetNames.includes("NPCs") ? "NPCs" : wb.SheetNames[0];
-        const ws = wb.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-
-        // Detect optional columns
-        const headerKeys = new Set();
-        for (const r of rows) for (const k of Object.keys(r)) headerKeys.add(k);
-
-        this.hasColumn = {
-          Location: headerKeys.has("Location"),
-          Attitude: headerKeys.has("Attitude"),
-          Met: headerKeys.has("Met"),
-          Recruited: headerKeys.has("Recruited"),
-          Defeated: headerKeys.has("Defeated"),
-        };
-
-        // Core columns you provided (+ optional extras if you add them later)
-        const coreKeys = new Set([
-          "Name","Gender","Age","Species","Concept","Description","Origin",
-          "Location","Attitude","Met","Recruited","Defeated",
-        ]);
-
-        const npcs = rows
-          .map((r, idx) => {
-            const name = String(r.Name || "").trim();
-            if (!name) return null;
-
-            const npc = {
-              __id: String(idx + 1),
-
-              Name: String(r.Name || "").trim(),
-              Gender: String(r.Gender || "").trim(),
-              Age: String(r.Age || "").trim(),
-              Species: String(r.Species || "").trim(),
-              Concept: String(r.Concept || "").trim(),
-              Description: String(r.Description || ""),
-              Origin: String(r.Origin || "").trim(),
-
-              // Optional (only meaningful if you add columns)
-              Location: String(r.Location || "").trim(),
-              Attitude: this.normalizeAttitude(r.Attitude),
-              Met: this.toBool(r.Met),
-              Recruited: this.toBool(r.Recruited),
-              Defeated: this.toBool(r.Defeated),
-
-              stats: {}
-            };
-
-            // Everything else becomes stats
-            for (const k of Object.keys(r)) {
-              if (coreKeys.has(k)) continue;
-              const v = r[k];
-              // Keep even blanks? user wants "?" display, but it's noisy to store blank stats.
-              // We'll store only non-empty, and display "?" when missing.
-              if (v === "" || v === null || v === undefined) continue;
-              npc.stats[k] = v;
-            }
-
-            return npc;
-          })
-          .filter(Boolean);
-
-        this.npcs = npcs;
-        this.selected = npcs[0] || null;
-
-        // reset disabled filters to any if column missing
-        if (!this.hasColumn.Location) this.filters.location = "any";
-        if (!this.hasColumn.Attitude) this.filters.attitude = "any";
-        if (!this.hasColumn.Met) this.filters.met = "any";
-        if (!this.hasColumn.Recruited) this.filters.recruited = "any";
-        if (!this.hasColumn.Defeated) this.filters.defeated = "any";
-
-        this.preloadAllImages();
-        this.setStatus("ok", `Loaded ${npcs.length} NPCs.`);
-      } catch (err) {
-        console.error(err);
-        this.setStatus("err", `Failed to load. Are you running a local server? (${err.message})`);
-      } finally {
-        this.isLoading = false;
-      }
-    }
-  },
-
-  mounted() {
-    // Auto-load on page open
-    this.refreshFromXlsx();
-  }
-}).mount("#app");
-</script>
+  <!-- App -->
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
